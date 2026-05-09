@@ -4,7 +4,9 @@ ROUTE_PROMPT = """判断以下任务的复杂度，只回答 "weak" 或 "strong"
 weak = 翻译、摘要、格式转换、简单问答、单函数代码
 strong = 架构设计、多步推理、代码审查、安全分析、复杂重构
 
-任务：{task}"""
+<user_input>
+{task}
+</user_input>"""
 
 
 def route_task(task: str, weak_model: DeepSeekModel) -> str:

@@ -10,19 +10,23 @@ mcp = FastMCP("dual-model-router")
 
 REVIEW_TOKEN_LIMIT = int(os.environ.get("REVIEW_TOKEN_LIMIT", "2000"))
 
-REVIEW_PROMPT_CODE = """原始任务：{task}
+REVIEW_PROMPT_CODE = """请审核以下代码修改：指出错误或遗漏，给出最终建议。
+
+<user_input>
+{task}
+</user_input>
 
 DeepSeek 的修改（diff 格式）：
-{weak_response}
+{weak_response}"""
 
-请审核以上修改：指出错误或遗漏，给出最终建议。"""
+REVIEW_PROMPT_TEXT = """请审核以下回答：指出错误或遗漏，并给出最终完整答案。
 
-REVIEW_PROMPT_TEXT = """原始任务：{task}
+<user_input>
+{task}
+</user_input>
 
 DeepSeek 的回答：
-{weak_response}
-
-请审核以上回答：指出错误或遗漏，并给出最终完整答案。"""
+{weak_response}"""
 
 
 def _estimate_tokens(text: str) -> int:
@@ -35,12 +39,11 @@ def _is_code_response(text: str) -> bool:
 
 def _format_error(step: str, model_name: str, error: Exception, model_type: str) -> str:
     error_type = type(error).__name__
-    error_msg = str(error)
     return (
         f"❌ 调用失败\n"
         f"  步骤: {step}\n"
         f"  模型: {model_name} ({'弱模型/DeepSeek' if model_type == 'weak' else '强模型/Anthropic'})\n"
-        f"  错误: {error_type}: {error_msg}\n"
+        f"  错误: {error_type}\n"
         f"---\n"
         f"建议: set_weak_model / set_strong_model 切换模型, list_available_models 查看可用模型, "
         f"或用 ask_weak / ask_strong 逐个调试"
