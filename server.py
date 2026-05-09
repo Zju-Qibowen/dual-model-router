@@ -200,5 +200,20 @@ def ask_strong(prompt: str, weak_response: str = "") -> str:
         return _format_error("强模型调用", strong.model, e, "strong")
 
 
+@mcp.tool()
+def review(content: str, context: str = "") -> str:
+    """用强模型审核任意内容。传入需要审核的文本，返回审核意见。
+    使用场景：审核 Claude Code 刚才的回答/代码修改/分析结论，或检查任意文本质量。
+    不需要路由判断，直接交给强模型审核。"""
+    _, strong = _get_models()
+    prompt = f"请审核以下内容，指出错误、遗漏或改进点：\n\n{content}"
+    if context:
+        prompt = f"背景：{context}\n\n{prompt}"
+    try:
+        return strong.call(prompt)
+    except Exception as e:
+        return _format_error("审核", strong.model, e, "strong")
+
+
 if __name__ == "__main__":
     mcp.run()
