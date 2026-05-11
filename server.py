@@ -50,6 +50,46 @@ def _format_error(step: str, model_name: str, error: Exception, model_type: str)
     )
 
 
+def _build_process_header(strong_path: bool, weak_model_name: str, strong_model_name: str) -> str:
+    """构建醒目的双路由处理过程头部"""
+    bar = "═" * 42
+    header = f"╔{bar}╗\n║  🔀 双模型路由处理中 …           ║\n╠{bar}╣"
+    if strong_path:
+        header += f"\n║  路由判断 → strong（复杂任务）   ║\n║  执行模型 → {strong_model_name:<22}║"
+    else:
+        header += f"\n║  路由判断 → weak（简单任务）      ║"
+    return header
+
+
+def _build_process_footer(strong_path: bool, reviewed: bool, weak_model_name: str, strong_model_name: str, token_count: int | None, note: str | None) -> str:
+    """构建路由处理过程尾部"""
+    bar = "═" * 42
+    lines = []
+    if strong_path:
+        lines.extend([
+            f"╚{bar}╝",
+            "",
+            "📌 以下为强模型直接生成的回答：",
+        ])
+    else:
+        lines.append(f"╠{bar}╣")
+        lines.append(f"║  执行模型 → {weak_model_name:<22}║")
+        if token_count is not None:
+            lines.append(f"║  输出量级 → ~{token_count} tokens{'':<16}║")
+        if reviewed:
+            lines.append(f"╠{bar}╣")
+            lines.append(f"║  审核模型 → {strong_model_name:<22}║")
+        lines.append(f"╚{bar}╝")
+        if not reviewed and note:
+            lines.append(f"\n⚠ {note}")
+        lines.append("")
+        if reviewed:
+            lines.append("📌 以下为强模型审核后的最终回答：")
+        else:
+            lines.append("📌 以下为弱模型的回答：")
+    return "\n".join(lines)
+
+
 def handle_task(
     task: str,
     weak: DeepSeekModel,
@@ -155,26 +195,25 @@ def route_and_answer(task: str) -> str:
     """自动路由任务到合适的模型并返回结果。简单任务用 DeepSeek，复杂任务用 Anthropic。"""
     weak, strong = _get_models()
     result = handle_task(task, weak, strong)
+    is_strong = result.get("routed_to") == "strong"
+
+    header = _build_process_header(is_strong, weak.model, strong.model)
 
     if result.get("_error"):
-        # 如果审核失败但弱模型结果已拿到，一并展示
         prefix = ""
         if result.get("weak_result"):
-            prefix = f"⚠️ 弱模型已执行但审核失败\n弱模型原始回答: {result['weak_result']}\n\n"
-        return prefix + _format_error(result["step"], result["model"], result["error"], result["model_type"])
+            prefix = f"║  ⚠ 弱模型已执行但审核失败         ║\n║  原始回答: {result['weak_result'][:50]:<22}║\n"
+        return header + "\n" + prefix + _format_error(result["step"], result["model"], result["error"], result["model_type"])
 
-    lines = [
-        f"路由到: {result['routed_to']} ({weak.model if result['routed_to'] == 'weak' else strong.model})",
-        f"已审核: {result['reviewed']}",
-    ]
-    if result.get("token_count") is not None:
-        lines.append(f"弱模型 token 估算: {result['token_count']}")
-    if result.get("weak_result") and result["reviewed"]:
-        lines.append(f"弱模型原始回答: {result['weak_result']}")
-    if "note" in result:
-        lines.append(result["note"])
-    log = "\n".join(f"  {l}" for l in lines)
-    return result["final_answer"] + f"\n\n---\n{log}"
+    footer = _build_process_footer(
+        is_strong,
+        result["reviewed"],
+        weak.model,
+        strong.model,
+        result.get("token_count"),
+        result.get("note"),
+    )
+    return f"{header}\n{footer}\n{result['final_answer']}"
 
 
 @mcp.tool()
@@ -182,7 +221,8 @@ def ask_weak(prompt: str) -> str:
     """直接调用 DeepSeek（弱模型）。"""
     weak, _ = _get_models()
     try:
-        return weak.call(prompt)
+        result = weak.call(prompt)
+        return f"🔀 双路由 · 弱模型 ({weak.model})\n{'─' * 42}\n{result}"
     except Exception as e:
         return _format_error("弱模型调用", weak.model, e, "weak")
 
@@ -194,8 +234,10 @@ def ask_strong(prompt: str, weak_response: str = "") -> str:
     try:
         if weak_response:
             context = f"以下是弱模型的回答，请审核并给出最终答案：\n{weak_response}"
-            return strong.call(prompt, context=context)
-        return strong.call(prompt)
+            result = strong.call(prompt, context=context)
+            return f"🔀 双路由 · 强模型审核 ({strong.model})\n{'─' * 42}\n{result}"
+        result = strong.call(prompt)
+        return f"🔀 双路由 · 强模型 ({strong.model})\n{'─' * 42}\n{result}"
     except Exception as e:
         return _format_error("强模型调用", strong.model, e, "strong")
 
@@ -210,7 +252,8 @@ def review(content: str, context: str = "") -> str:
     if context:
         prompt = f"背景：{context}\n\n{prompt}"
     try:
-        return strong.call(prompt)
+        result = strong.call(prompt)
+        return f"🔀 双路由 · 审核 ({strong.model})\n{'─' * 42}\n{result}"
     except Exception as e:
         return _format_error("审核", strong.model, e, "strong")
 
