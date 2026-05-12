@@ -130,7 +130,9 @@ claude mcp disable dual-model-router
 | `DEEPSEEK_BASE_URL` | DeepSeek API 地址 | `https://api.deepseek.com` |
 | `DEEPSEEK_MODEL` | 默认弱模型 | `deepseek-v4-pro` |
 | `ANTHROPIC_MODEL` | 默认强模型 | `claude-sonnet-4-6` |
-| `REVIEW_TOKEN_LIMIT` | 审核 token 上限，超过则跳过审核 | `2000` |
+| `REVIEW_TOKEN_LIMIT` | 弱模型审核 token 上限，超过则跳过审核 | `2000` |
+| `ANTHROPIC_MAX_TOKENS` | 强模型 API 调用硬上限（兜底，不截断） | `32000` |
+| `ANTHROPIC_WARN_TOKENS` | 强模型输出超过此值追加用量提醒 | `8000` |
 | `WEAK_MODELS` | 可选弱模型列表（逗号分隔），供 `list_available_models` 展示 | 见 `.env` |
 | `STRONG_MODELS` | 可选强模型列表（逗号分隔），供 `list_available_models` 展示 | 见 `.env` |
 
