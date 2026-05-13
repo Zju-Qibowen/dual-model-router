@@ -23,7 +23,10 @@ class DeepSeekModel:
 class AnthropicModel:
     def __init__(self, api_key: str, model: str, base_url: str = None,
                  max_tokens: int = 32000, warn_tokens: int = 8000):
-        self.client = Anthropic(api_key=api_key, base_url=base_url) if base_url else Anthropic(api_key=api_key)
+        kwargs = dict(api_key=api_key, timeout=600)
+        if base_url:
+            kwargs["base_url"] = base_url
+        self.client = Anthropic(**kwargs)
         self.model = model
         self.max_tokens = max_tokens
         self.warn_tokens = warn_tokens
