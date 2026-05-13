@@ -39,11 +39,12 @@ def _is_code_response(text: str) -> bool:
 
 def _format_error(step: str, model_name: str, error: Exception, model_type: str) -> str:
     error_type = type(error).__name__
+    error_msg = str(error)
     return (
         f"❌ 调用失败\n"
         f"  步骤: {step}\n"
         f"  模型: {model_name} ({'弱模型/DeepSeek' if model_type == 'weak' else '强模型/Anthropic'})\n"
-        f"  错误: {error_type}\n"
+        f"  错误: {error_type}: {error_msg}\n"
         f"---\n"
         f"建议: set_weak_model / set_strong_model 切换模型, list_available_models 查看可用模型, "
         f"或用 ask_weak / ask_strong 逐个调试"
