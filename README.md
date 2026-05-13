@@ -118,7 +118,6 @@ claude mcp disable dual-model-router
 | `set_weak_model` | 临时切换 DeepSeek 模型 |
 | `set_strong_model` | 临时切换 Anthropic 模型 |
 | `list_models` | 查看当前使用的模型 |
-| `list_available_models` | 列出所有可选的弱模型和强模型 |
 
 ## 配置说明
 
@@ -133,15 +132,8 @@ claude mcp disable dual-model-router
 | `REVIEW_TOKEN_LIMIT` | 弱模型审核 token 上限，超过则跳过审核 | `2000` |
 | `ANTHROPIC_MAX_TOKENS` | 强模型 API 调用硬上限（兜底，不截断） | `32000` |
 | `ANTHROPIC_WARN_TOKENS` | 强模型输出超过此值追加用量提醒 | `8000` |
-| `WEAK_MODELS` | 可选弱模型列表（逗号分隔），供 `list_available_models` 展示 | 见 `.env` |
-| `STRONG_MODELS` | 可选强模型列表（逗号分隔），供 `list_available_models` 展示 | 见 `.env` |
 
 示例：
-
-```
-WEAK_MODELS=deepseek-v4-flash,deepseek-v4-pro
-STRONG_MODELS=claude-sonnet-4-6,claude-opus-4-6,claude-haiku-4-5
-```
 
 ## 运行测试
 

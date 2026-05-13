@@ -149,23 +149,6 @@ def _get_models():
 
 
 @mcp.tool()
-def list_available_models() -> str:
-    """列出所有可选的弱模型和强模型（从 .env 的 WEAK_MODELS / STRONG_MODELS 读取）。"""
-    weak_models = os.environ.get("WEAK_MODELS", "").split(",")
-    strong_models = os.environ.get("STRONG_MODELS", "").split(",")
-    weak, strong = _get_models()
-    weak_list = "\n".join(
-        f"  {'* ' if m.strip() == weak.model else '  '}{m.strip()}"
-        for m in weak_models if m.strip()
-    )
-    strong_list = "\n".join(
-        f"  {'* ' if m.strip() == strong.model else '  '}{m.strip()}"
-        for m in strong_models if m.strip()
-    )
-    return f"弱模型（* 为当前）:\n{weak_list}\n\n强模型（* 为当前）:\n{strong_list}"
-
-
-@mcp.tool()
 def set_weak_model(model: str) -> str:
     """切换弱模型（DeepSeek）。可用值如 deepseek-chat、deepseek-reasoner。"""
     global _weak
