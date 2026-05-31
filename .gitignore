@@ -1,1 +1,5 @@
 .env
+__pycache__/
+*.pyc
+tests/test_image_b64.txt
+tests/wechat_image_b64.json

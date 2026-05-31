@@ -20,7 +20,10 @@ def test_deepseek_call_returns_string():
 def test_anthropic_call_returns_string():
     model = AnthropicModel(api_key="fake-key", model="claude-haiku-4-5-20251001", base_url="https://fake.proxy.com")
     mock_response = MagicMock()
-    mock_response.content[0].text = "hello from anthropic"
+    mock_block = MagicMock()
+    mock_block.type = "text"
+    mock_block.text = "hello from anthropic"
+    mock_response.content = [mock_block]
     with patch.object(model.client.messages, "create", return_value=mock_response):
         result = model.call("say hello")
     assert result == "hello from anthropic"
@@ -29,7 +32,10 @@ def test_anthropic_call_returns_string():
 def test_anthropic_call_with_context():
     model = AnthropicModel(api_key="fake-key", model="claude-haiku-4-5-20251001", base_url="https://fake.proxy.com")
     mock_response = MagicMock()
-    mock_response.content[0].text = "reviewed"
+    mock_block = MagicMock()
+    mock_block.type = "text"
+    mock_block.text = "reviewed"
+    mock_response.content = [mock_block]
     with patch.object(model.client.messages, "create", return_value=mock_response) as mock_create:
         result = model.call("review this", context="original content")
     assert result == "reviewed"
