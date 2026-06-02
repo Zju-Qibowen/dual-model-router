@@ -7,6 +7,7 @@ from mcp.server.fastmcp import FastMCP
 from dotenv import load_dotenv
 from models import load_models, DeepSeekModel, AnthropicModel, ImageDescriptionTruncated
 from router import route_task
+from conversation import ConversationHistory
 
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"), override=True)
 
@@ -28,7 +29,6 @@ MAX_IMAGE_BYTES = 10 * 1024 * 1024  # 10 MB per image
 MAX_PARTIAL_TEXT_CHARS = 6000         # 截断描述最多保留字符数
 DEFAULT_IMAGE_PROMPT = "请根据以上图片内容回答问题。"
 
-REVIEW_TOKEN_LIMIT = int(os.environ.get("REVIEW_TOKEN_LIMIT", "2000"))
 
 REVIEW_PROMPT_CODE = """请审核以下代码修改：指出错误或遗漏，给出最终建议。
 
@@ -60,14 +60,11 @@ def _is_code_response(text: str) -> bool:
 def _format_error(step: str, model_name: str, error: Exception, model_type: str) -> str:
     error_type = type(error).__name__
     error_msg = str(error)
+    label = "弱模型" if model_type == "weak" else "强模型"
     return (
-        f"❌ 调用失败\n"
-        f"  步骤: {step}\n"
-        f"  模型: {model_name} ({'弱模型/DeepSeek' if model_type == 'weak' else '强模型/Anthropic'})\n"
-        f"  错误: {error_type}: {error_msg}\n"
-        f"---\n"
-        f"建议: set_weak_model / set_strong_model 切换模型, list_available_models 查看可用模型, "
-        f"或用 ask_weak / ask_strong 逐个调试"
+        f"[错误: {step} | {label}: {model_name}]\n"
+        f"{error_type}: {error_msg}\n"
+        f"建议: set_weak_model / set_strong_model 切换模型, 或用 ask_weak / ask_strong 逐个调试"
     )
 
 
@@ -240,68 +237,31 @@ def _describe_images(
 # ═══════════════════════════════════════════════════
 
 def _build_process_header(
-    strong_path: bool,
+    route_decision: str,
     weak_model_name: str,
     strong_model_name: str,
     images_processed: int = 0,
     images_truncated: bool = False,
     warnings: list[str] | None = None,
 ) -> str:
-    """构建双路由处理过程头部。"""
-    bar = "═" * 42
-    header = f"╔{bar}╗\n║  🔀 双模型路由处理中 …           ║\n╠{bar}╣"
+    """构建简洁的路由元信息行。"""
+    parts = []
     if images_processed > 0:
-        status = "⚠ 不完整" if images_truncated else "✅"
-        header += (
-            f"\n║  🖼️ 图片预处理 → strong 解析       ║"
-            f"\n║     ({images_processed} 张图片 → 文本描述) {status:<10}║"
-        )
+        status = "⚠不完整" if images_truncated else ""
+        parts.append(f"图片: {images_processed}张{status}")
     if warnings:
-        for w in warnings[:3]:  # 最多展示3条警告
-            # 截断过长的警告文本以适配边框
-            short = w[:38] + "…" if len(w) > 38 else w
-            header += f"\n║  ⚠ {short:<38}║"
-    if strong_path:
-        header += f"\n║  路由判断 → strong（复杂任务）   ║\n║  执行模型 → {strong_model_name:<22}║"
+        parts.append(f"警告: {'; '.join(warnings[:2])}")
+
+    if route_decision == "strong":
+        parts.append(f"路由: strong → {strong_model_name}")
+    elif route_decision == "medium":
+        parts.append(f"路由: medium → {weak_model_name} + {strong_model_name}审核")
     else:
-        header += f"\n║  路由判断 → weak（简单任务）      ║"
-    return header
+        parts.append(f"路由: weak → {weak_model_name}")
+
+    return "[" + " | ".join(parts) + "]"
 
 
-def _build_process_footer(
-    strong_path: bool,
-    reviewed: bool,
-    weak_model_name: str,
-    strong_model_name: str,
-    token_count: int | None,
-    note: str | None,
-) -> str:
-    """构建路由处理过程尾部。"""
-    bar = "═" * 42
-    lines = []
-    if strong_path:
-        lines.extend([
-            f"╚{bar}╝",
-            "",
-            "📌 以下为强模型直接生成的回答：",
-        ])
-    else:
-        lines.append(f"╠{bar}╣")
-        lines.append(f"║  执行模型 → {weak_model_name:<22}║")
-        if token_count is not None:
-            lines.append(f"║  输出量级 → ~{token_count} tokens{'':<16}║")
-        if reviewed:
-            lines.append(f"╠{bar}╣")
-            lines.append(f"║  审核模型 → {strong_model_name:<22}║")
-        lines.append(f"╚{bar}╝")
-        if not reviewed and note:
-            lines.append(f"\n⚠ {note}")
-        lines.append("")
-        if reviewed:
-            lines.append("📌 以下为强模型审核后的最终回答：")
-        else:
-            lines.append("📌 以下为弱模型的回答：")
-    return "\n".join(lines)
 
 
 # ═══════════════════════════════════════════════════
@@ -312,13 +272,19 @@ def handle_task(
     task: str,
     weak: DeepSeekModel,
     strong: AnthropicModel,
-    review_token_limit: int = REVIEW_TOKEN_LIMIT,
     execution_task: str | None = None,
+    history: list[dict] | None = None,
 ) -> dict:
     """路由 + 执行。
 
+    三档路由：
+    - weak: 弱模型执行，不审核
+    - medium: 弱模型执行 + 强模型审核
+    - strong: 强模型直接执行
+
     task: 用于路由判断的文本（不含图片描述，避免描述文本干扰路由）
     execution_task: 实际执行的文本（含图片描述）。为 None 时使用 task。
+    history: 对话历史（传给执行调用，不传给路由判断和审核）。
     """
     if execution_task is None:
         execution_task = task
@@ -330,28 +296,30 @@ def handle_task(
 
     if decision == "strong":
         try:
-            answer = strong.call(execution_task)
+            answer = strong.call(execution_task, history=history)
         except Exception as e:
             return {"_error": True, "step": "强模型直接执行", "model": strong.model, "model_type": "strong", "error": e}
         return {"routed_to": "strong", "final_answer": answer, "reviewed": False, "weak_result": None, "token_count": None}
 
+    # weak 和 medium 都先走弱模型执行
     try:
-        weak_result = weak.call(execution_task)
+        weak_result = weak.call(execution_task, history=history)
     except Exception as e:
         return {"_error": True, "step": "弱模型执行", "model": weak.model, "model_type": "weak", "error": e}
 
     token_count = _estimate_tokens(weak_result)
 
-    if token_count > review_token_limit:
+    # weak: 直接返回，不审核
+    if decision == "weak":
         return {
             "routed_to": "weak",
             "final_answer": weak_result,
             "reviewed": False,
             "weak_result": weak_result,
             "token_count": token_count,
-            "note": f"输出超过 {review_token_limit} token 限制（约 {token_count} tokens），已跳过审核",
         }
 
+    # medium: 强模型审核（审核 prompt 自包含，不传 history）
     if _is_code_response(weak_result):
         review_prompt = REVIEW_PROMPT_CODE.format(task=execution_task, weak_response=weak_result)
     else:
@@ -362,10 +330,11 @@ def handle_task(
     except Exception as e:
         return {"_error": True, "step": "强模型审核", "model": strong.model, "model_type": "strong", "error": e, "weak_result": weak_result, "token_count": token_count}
 
-    return {"routed_to": "weak", "final_answer": reviewed, "reviewed": True, "weak_result": weak_result, "token_count": token_count}
+    return {"routed_to": "medium", "final_answer": reviewed, "reviewed": True, "weak_result": weak_result, "token_count": token_count}
 
 
 _weak, _strong = None, None
+_history = ConversationHistory()
 
 
 def _get_models():
@@ -406,22 +375,17 @@ def list_models() -> str:
 
 @mcp.tool()
 def route_and_answer(task: str, images_json: str = "") -> str:
-    """自动路由任务到合适的模型并返回结果。简单任务用 DeepSeek，复杂任务用 Anthropic。
+    """自动路由任务到合适的模型并返回结果。支持多轮追问（服务端维护对话历史）。
+    三档路由：weak→弱模型直接回答，medium→弱模型+强模型审核，strong→强模型直接执行。
+    支持图片输入（images_json 或内嵌 data:image URL）。
 
-    如果输入包含图片（通过 images_json 或内嵌 data:image URL），
-    会先将图片交给强模型解析为文本描述，再合并到任务中走正常路由。
-    DeepSeek（不支持多模态）因此也能间接处理图片内容。
-
-    路由判断基于原始任务文本（不含图片描述），避免描述文本干扰复杂度判断。"""
+    展示要求：请按如下格式向用户展示结果——
+    > **[元信息行原样保留]**
+    > （空行后引用块展示模型原文）"""
     weak, strong = _get_models()
 
-    # ── 收集图片 ──
-    # cleaned_task: 清理了 base64 的文本（含 [图片] 占位符）
     cleaned_task, all_images, warnings = _collect_images(task, images_json)
 
-    # ── 图片预处理：强模型解析为文本描述 ──
-    # 注意：传 cleaned_task 给 describe_images（不含 base64 data URL），
-    # 而非 original task（含 base64，会让请求体膨胀数倍）
     images_truncated = False
     descriptions = ""
     if all_images:
@@ -429,47 +393,50 @@ def route_and_answer(task: str, images_json: str = "") -> str:
         if descriptions.startswith("\n\n[⚠ 图片描述不完整"):
             images_truncated = True
 
-    # ── 路由判断基于 cleaned_task（不含图片描述）──
-    # 执行时附加图片描述
     execution_task = f"{cleaned_task}{descriptions}" if descriptions else cleaned_task
 
+    # 记录用户输入（用 execution_task 以便后续追问时模型知道图片内容）
+    _history.add_user(execution_task)
+
     result = handle_task(
-        task=cleaned_task,           # 路由用：纯文本
-        execution_task=execution_task,  # 执行用：文本 + 图片描述
+        task=cleaned_task,
+        execution_task=execution_task,
         weak=weak,
         strong=strong,
+        history=_history.get_messages()[:-1],  # 不含刚加的当前 user message（由 model.call 自行追加）
     )
-    is_strong = result.get("routed_to") == "strong"
+    route_decision = result.get("routed_to", "strong")
+
+    # 成功且回答非空时记录 assistant 回答
+    if not result.get("_error") and result.get("final_answer"):
+        _history.add_assistant(result["final_answer"])
 
     header = _build_process_header(
-        is_strong, weak.model, strong.model,
+        route_decision, weak.model, strong.model,
         images_processed=len(all_images),
         images_truncated=images_truncated,
         warnings=warnings if warnings else None,
     )
 
     if result.get("_error"):
+        # 失败时撤回刚加的 user message
+        if _history.turns and _history.turns[-1]["role"] == "user":
+            _history.turns.pop()
         prefix = ""
         if result.get("weak_result"):
-            prefix = f"║  ⚠ 弱模型已执行但审核失败         ║\n║  原始回答: {result['weak_result'][:50]:<22}║\n"
+            prefix = f"弱模型已执行但审核失败，原始回答: {result['weak_result'][:100]}\n"
         return header + "\n" + prefix + _format_error(result["step"], result["model"], result["error"], result["model_type"])
 
-    footer = _build_process_footer(
-        is_strong,
-        result["reviewed"],
-        weak.model,
-        strong.model,
-        result.get("token_count"),
-        result.get("note"),
-    )
-    return f"{header}\n{footer}\n{result['final_answer']}"
+    return f"{header}\n{result['final_answer']}"
 
 
 @mcp.tool()
 def ask_weak(prompt: str, images_json: str = "") -> str:
-    """直接调用 DeepSeek（弱模型）。
+    """直接调用 DeepSeek（弱模型）。支持多轮对话上下文。如有图片会先用强模型解析为文本描述。
 
-    DeepSeek 不支持多模态，如有图片会先用强模型解析为文本描述。"""
+    展示要求：请按如下格式向用户展示结果——
+    > **[元信息行原样保留]**
+    > （空行后引用块展示模型原文）"""
     weak, strong = _get_models()
 
     prompt, all_images, warnings = _collect_images(prompt, images_json)
@@ -480,75 +447,100 @@ def ask_weak(prompt: str, images_json: str = "") -> str:
             if not prompt.strip():
                 prompt = DEFAULT_IMAGE_PROMPT
             prompt = f"{prompt}{descriptions}"
-            warn_line = f"\n║  ⚠ {'; '.join(warnings[:2])[:38]:<38}║" if warnings else ""
-            header = (
-                f"🔀 双路由 · 弱模型 ({weak.model})\n"
-                f"╟{'─' * 42}╢\n"
-                f"║  🖼️ 图片预处理 → strong 解析 ({len(all_images)} 张)  ║"
-                f"{warn_line}\n"
-                f"╙{'─' * 42}╜"
-            )
+            header = f"[弱模型: {weak.model} | 图片: {len(all_images)}张]"
         else:
-            header = f"🔀 双路由 · 弱模型 ({weak.model})\n{'─' * 42}"
+            header = f"[弱模型: {weak.model}]"
 
-        result = weak.call(prompt)
+        _history.add_user(prompt)
+        result = weak.call(prompt, history=_history.get_messages()[:-1])
+        _history.add_assistant(result)
         return f"{header}\n{result}"
     except Exception as e:
+        if _history.turns and _history.turns[-1]["role"] == "user":
+            _history.turns.pop()
         return _format_error("弱模型调用", weak.model, e, "weak")
 
 
 @mcp.tool()
 def ask_strong(prompt: str, weak_response: str = "", images_json: str = "") -> str:
-    """直接调用 Anthropic（强模型）。可选传入弱模型结果作为审核上下文。
+    """直接调用 Anthropic（强模型）。支持多轮对话上下文。可选传入弱模型结果作为审核上下文。
+    支持多模态图片直接传入。
 
-    强模型原生支持多模态，图片直接传入。如果当前强模型不支持视觉，
-    会回退到 describe_images 路径。"""
+    展示要求：请按如下格式向用户展示结果——
+    > **[元信息行原样保留]**
+    > （空行后引用块展示模型原文）"""
     _, strong = _get_models()
 
     prompt, all_images, warnings = _collect_images(prompt, images_json)
 
     try:
         if all_images and not strong.supports_vision:
-            # 当前强模型不支持视觉 → 回退到图片→文本→强模型路径
             descriptions = _describe_images(all_images, prompt, strong)
             if not prompt.strip():
                 prompt = DEFAULT_IMAGE_PROMPT
             prompt = f"{prompt}{descriptions}"
 
+        _history.add_user(prompt)
+        hist = _history.get_messages()[:-1]
+
         if weak_response:
             context = f"以下是弱模型的回答，请审核并给出最终答案：\n{weak_response}"
             full_prompt = f"{context}\n\n{prompt}"
-            header = f"🔀 双路由 · 强模型审核 ({strong.model})\n{'─' * 42}"
+            header = f"[强模型审核: {strong.model}]"
             if all_images and strong.supports_vision:
-                result = strong.call_with_images(full_prompt, all_images)
+                result = strong.call_with_images(full_prompt, all_images, history=hist)
             else:
-                result = strong.call(full_prompt)
+                result = strong.call(full_prompt, history=hist)
         elif all_images and strong.supports_vision:
-            header = f"🔀 双路由 · 强模型 ({strong.model}) [多模态]\n{'─' * 42}"
-            result = strong.call_with_images(prompt, all_images)
+            header = f"[强模型: {strong.model} | 多模态]"
+            result = strong.call_with_images(prompt, all_images, history=hist)
         else:
-            header = f"🔀 双路由 · 强模型 ({strong.model})\n{'─' * 42}"
-            result = strong.call(prompt)
+            header = f"[强模型: {strong.model}]"
+            result = strong.call(prompt, history=hist)
 
+        _history.add_assistant(result)
         return f"{header}\n{result}"
     except Exception as e:
+        if _history.turns and _history.turns[-1]["role"] == "user":
+            _history.turns.pop()
         return _format_error("强模型调用", strong.model, e, "strong")
 
 
 @mcp.tool()
 def review(content: str, context: str = "") -> str:
-    """用强模型审核任意内容。传入需要审核的文本，返回审核意见。
-    使用场景：审核 Claude Code 刚才的回答/代码修改/分析结论，或检查任意文本质量。
-    不需要路由判断，直接交给强模型审核。"""
+    """用强模型审核任意内容，返回审核意见。不计入对话历史。
+
+    展示要求：请按如下格式向用户展示结果——
+    > **[元信息行原样保留]**
+    > （空行后引用块展示审核原文）"""
     _, strong = _get_models()
     prompt = f"请审核以下内容，指出错误、遗漏或改进点：\n\n{content}"
     if context:
         prompt = f"背景：{context}\n\n{prompt}"
     try:
-        result = strong.call(prompt)
-        return f"🔀 双路由 · 审核 ({strong.model})\n{'─' * 42}\n{result}"
+        result = strong.call(prompt, history=_history.get_messages())
+        return f"[审核: {strong.model}]\n{result}"
     except Exception as e:
         return _format_error("审核", strong.model, e, "strong")
+
+
+@mcp.tool()
+def clear_context() -> str:
+    """清除对话历史。开始新话题或上下文不再相关时使用。"""
+    count = _history.turn_count
+    _history.clear()
+    return f"已清除对话历史（{count} 轮对话）。后续调用将不包含之前的上下文。"
+
+
+@mcp.tool()
+def get_context_status() -> str:
+    """查看当前对话上下文状态：轮数、token 估算。"""
+    return (
+        f"对话历史状态:\n"
+        f"  轮数: {_history.turn_count}/{_history.max_turns}\n"
+        f"  估计 tokens: {_history.estimated_tokens}/{_history.max_tokens}\n"
+        f"  消息数: {len(_history.turns)}"
+    )
 
 
 if __name__ == "__main__":

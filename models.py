@@ -29,11 +29,13 @@ class DeepSeekModel:
         self.client = OpenAI(api_key=api_key, base_url=base_url)
         self.model = model
 
-    def call(self, prompt: str, context: Optional[str] = None) -> str:
+    def call(self, prompt: str, context: Optional[str] = None, history: Optional[list[dict]] = None) -> str:
         content = f"{context}\n\n{prompt}" if context else prompt
+        messages = list(history) if history else []
+        messages.append({"role": "user", "content": content})
         response = self.client.chat.completions.create(
             model=self.model,
-            messages=[{"role": "user", "content": content}],
+            messages=messages,
         )
         return response.choices[0].message.content
 
@@ -158,13 +160,15 @@ class AnthropicModel:
 
     # ── 公开方法 ────────────────────────────────
 
-    def call(self, prompt: str, context: Optional[str] = None) -> str:
+    def call(self, prompt: str, context: Optional[str] = None, history: Optional[list[dict]] = None) -> str:
         """纯文本调用。"""
         content = f"{context}\n\n{prompt}" if context else prompt
+        messages = list(history) if history else []
+        messages.append({"role": "user", "content": content})
         response = self.client.messages.create(
             model=self.model,
             max_tokens=self.max_tokens,
-            messages=[{"role": "user", "content": content}],
+            messages=messages,
         )
         text = self._extract_text(response)
         return self._post_process(text, response)
@@ -216,7 +220,7 @@ class AnthropicModel:
 
         return text
 
-    def call_with_images(self, prompt: str, images: list[dict]) -> str:
+    def call_with_images(self, prompt: str, images: list[dict], history: Optional[list[dict]] = None) -> str:
         """原生多模态调用 —— prompt + 图片直接发给强模型。
 
         describe_images 截断时抛异常（中间产物，下游不知情），
@@ -225,6 +229,7 @@ class AnthropicModel:
         Args:
             prompt: 文本提示
             images: [{"data": "<base64>", "media_type": "image/png"}, ...]
+            history: 对话历史（可选）
 
         Returns:
             模型回复文本
@@ -239,14 +244,16 @@ class AnthropicModel:
                 f"图片数量 ({len(images)}) 超过单次请求上限 ({MAX_IMAGES_PER_REQUEST})"
             )
 
-        # 图片在前，文本在后（Anthropic 推荐顺序，视觉理解效果更好）
         content_blocks = [self._image_to_block(img) for img in images]
         content_blocks.append({"type": "text", "text": prompt})
+
+        messages = list(history) if history else []
+        messages.append({"role": "user", "content": content_blocks})
 
         response = self.client.messages.create(
             model=self.model,
             max_tokens=self.max_tokens,
-            messages=[{"role": "user", "content": content_blocks}],
+            messages=messages,
         )
         text = self._extract_text(response)
         return self._post_process(text, response)

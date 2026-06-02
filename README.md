@@ -1,6 +1,6 @@
 # dual-model-router
 
-一个 MCP Server，让 Claude Code 在单个窗口内自动路由任务到 DeepSeek（便宜）或 Anthropic（强），简单任务由 DeepSeek 执行后由 Anthropic 审核，复杂任务直接交给 Anthropic 处理。支持图片输入——DeepSeek 不支持多模态，路由会自动将图片交给强模型解析为文本描述再继续。
+一个 MCP Server，让 Claude Code 在单个窗口内自动路由任务到 DeepSeek（便宜）或 Anthropic（强）。三档路由：简单任务由 DeepSeek 直接处理，中等任务由 DeepSeek 执行后 Anthropic 审核，复杂任务直接交给 Anthropic。支持图片输入——DeepSeek 不支持多模态，路由会自动将图片交给强模型解析为文本描述再继续。
 
 ## 工作原理
 
@@ -12,15 +12,17 @@
     ▼                        ▼
 DeepSeek 判断复杂度（路由，基于纯文本，不含描述）
     │
-    ├── 简单任务 → DeepSeek 执行（含图片描述）→ Anthropic 审核 → 最终结果
+    ├── weak（简单）→ DeepSeek 直接执行 → 最终结果
     │
-    └── 复杂任务 → Anthropic 直接执行（含图片描述）→ 最终结果
+    ├── medium（中等）→ DeepSeek 执行 → Anthropic 审核 → 最终结果
+    │
+    └── strong（复杂）→ Anthropic 直接执行 → 最终结果
 ```
 
 关键设计：
 - **路由判断基于原始文本**，不含图片描述——避免描述文本干扰复杂度判断
 - **图片描述只参与执行**，不参与路由——即使有图片，简单问答仍走弱模型
-- 审核时只传 diff 或文本差异，设有 token 上限（默认 2000），超过则跳过审核
+- **三档路由**：weak 不审核（节省强模型调用），medium 必审核，strong 直接用强模型
 
 ### 🖼️ 多模态处理
 
@@ -40,10 +42,11 @@ DeepSeek v4 不支持多模态输入。当任务包含图片时，管线自动�
 路由输入：纯文本 task（不含图片描述，避免关键词污染）
     │
     ▼
-DeepSeek 分类 → "weak" 或 "strong"（支持中英文变体、markdown 格式）
+DeepSeek 分类 → "weak"、"medium" 或 "strong"（支持中英文变体、markdown 格式）
     │
-    ├── "weak" / "弱"     → 弱模型执行
-    ├── "strong" / "强"   → 强模型执行
+    ├── "weak" / "弱"     → 弱模型直接执行，不审核
+    ├── "medium" / "中"   → 弱模型执行 + 强模型审核
+    ├── "strong" / "强"   → 强模型直接执行
     └── 无法解析 / 调用失败 → 降级到 strong（fail-safe）
 ```
 
@@ -81,7 +84,6 @@ DEEPSEEK_API_KEY=your_deepseek_api_key_here
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_MODEL=deepseek-v4-pro
 ANTHROPIC_MODEL=claude-sonnet-4-6
-REVIEW_TOKEN_LIMIT=2000
 ANTHROPIC_MAX_TOKENS=32000
 ANTHROPIC_WARN_TOKENS=8000
 ```
@@ -176,7 +178,6 @@ claude mcp disable dual-model-router
 | `DEEPSEEK_BASE_URL` | DeepSeek API 地址 | `https://api.deepseek.com` |
 | `DEEPSEEK_MODEL` | 默认弱模型 | `deepseek-v4-pro` |
 | `ANTHROPIC_MODEL` | 默认强模型 | `claude-sonnet-4-6` |
-| `REVIEW_TOKEN_LIMIT` | 弱模型审核 token 上限，超过则跳过审核 | `2000` |
 | `ANTHROPIC_MAX_TOKENS` | 强模型 API 调用硬上限 | `32000` |
 | `ANTHROPIC_WARN_TOKENS` | 强模型输出超过此值追加用量提醒 | `8000` |
 
