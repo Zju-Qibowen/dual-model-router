@@ -212,7 +212,6 @@ class ConversationHistory:
         if pre_context:
             if parts:
                 parts.append("")
-            parts.append("---")
             parts.append("[参考材料 · 预收集的上下文]")
             parts.append(pre_context)
 
@@ -220,8 +219,6 @@ class ConversationHistory:
         if self._tool_notes:
             if parts:
                 parts.append("")
-            if not pre_context:
-                parts.append("---")
             parts.append("[参考材料 · Claude Code 已执行的步骤]")
             for note in self._tool_notes:
                 parts.append(f"- {note}")
@@ -237,8 +234,6 @@ class ConversationHistory:
                 )
             if parts:
                 parts.append("")
-            if not pre_context and not self._tool_notes:
-                parts.append("---")
             parts.append("[参考材料 · 对话摘要]")
             parts.append(summary_text)
 
@@ -247,8 +242,6 @@ class ConversationHistory:
         if fallback:
             if parts:
                 parts.append("")
-            if not pre_context and not self._tool_notes and not self.summary:
-                parts.append("---")
             parts.append(fallback)
 
         # —— 最近对话 ——
@@ -269,8 +262,6 @@ class ConversationHistory:
                     recent_lines.append(f"{prefix}{content}")
             if parts:
                 parts.append("")
-            if not pre_context and not self._tool_notes and not self.summary and not fallback:
-                parts.append("---")
             parts.append("[参考材料 · 最近对话]")
             parts.append("\n".join(recent_lines))
 
