@@ -83,42 +83,42 @@ def test_get_messages_excludes_internal_fields():
 
 
 def test_get_context_for_strong_with_pre_context():
-    """pre_context 应出现在输出最前面。"""
+    """当前任务应出现在输出最前面，预收集上下文作为参考材料在后。"""
     h = ConversationHistory()
     h.add_user("hello")
     h.add_assistant("hi", source="weak")
 
     result = h.get_context_for_strong(task="current task", pre_context="[文件: foo.py]\nprint('hello')")
 
-    assert "[预收集的上下文]" in result
+    assert "[当前任务]" in result
+    assert "[参考材料 · 预收集的上下文]" in result
     assert "[文件: foo.py]" in result
     assert "print('hello')" in result
-    assert "[当前任务]" in result
-    # 预收集上下文应在摘要/最近对话/当前任务之前
-    pre_pos = result.index("[预收集的上下文]")
+    # 当前任务应在参考材料之前
     task_pos = result.index("[当前任务]")
-    assert pre_pos < task_pos
+    ref_pos = result.index("[参考材料 · 预收集的上下文]")
+    assert task_pos < ref_pos
 
 
 def test_get_context_for_strong_empty_pre_context():
-    """pre_context 为空时不应添加 [预收集的上下文] 段落。"""
+    """pre_context 为空时不应添加参考材料段落。"""
     h = ConversationHistory()
     h.add_user("hello")
     h.add_assistant("hi")
 
     result = h.get_context_for_strong(task="current", pre_context="")
 
-    assert "[预收集的上下文]" not in result
-    assert "[最近对话]" in result
+    assert "[参考材料 · 预收集的上下文]" not in result
+    assert "[参考材料 · 最近对话]" in result
 
 
 def test_get_context_for_strong_pre_context_only():
-    """只有 pre_context 没有 task 时，应返回 pre_context 内容。"""
+    """只有 pre_context 没有 task 时，以 --- 分隔符开头。"""
     h = ConversationHistory()
 
     result = h.get_context_for_strong(pre_context="some context")
 
-    assert result.startswith("[预收集的上下文]")
+    assert "[参考材料 · 预收集的上下文]" in result
     assert "some context" in result
 
 
@@ -132,13 +132,13 @@ def test_add_tool_note():
 
     result = h.get_context_for_strong(task="current task")
 
-    assert "[工具操作记录" in result
+    assert "[参考材料 · Claude Code 已执行的步骤]" in result
     assert "已读取 server.py" in result
     assert "git diff 显示 3 个文件被修改" in result
-    # 工具操作记录应在当前任务之前
-    notes_pos = result.index("[工具操作记录")
+    # 当前任务应在工具操作记录之前
     task_pos = result.index("[当前任务]")
-    assert notes_pos < task_pos
+    notes_pos = result.index("[参考材料 · Claude Code 已执行的步骤]")
+    assert task_pos < notes_pos
 
 
 def test_tool_note_does_not_affect_turn_count():
@@ -152,7 +152,7 @@ def test_tool_note_does_not_affect_turn_count():
 
 
 def test_tool_note_included_in_pre_context_order():
-    """工具操作记录应在预收集上下文之后、摘要之前。"""
+    """当前任务在前，参考材料在后。"""
     h = ConversationHistory()
     h.add_user("hello")
     h.add_assistant("hi")
@@ -160,10 +160,10 @@ def test_tool_note_included_in_pre_context_order():
 
     result = h.get_context_for_strong(task="task", pre_context="file content")
 
-    pre_pos = result.index("[预收集的上下文]")
-    notes_pos = result.index("[工具操作记录")
     task_pos = result.index("[当前任务]")
-    assert pre_pos < notes_pos < task_pos
+    pre_pos = result.index("[参考材料 · 预收集的上下文]")
+    notes_pos = result.index("[参考材料 · Claude Code 已执行的步骤]")
+    assert task_pos < pre_pos < notes_pos
 
 
 def test_tool_note_cleared_with_history():

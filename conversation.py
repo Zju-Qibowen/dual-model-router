@@ -207,16 +207,26 @@ class ConversationHistory:
 
         parts = []
 
-        # —— 预收集的上下文（新增，放在最前面）——
+        # —— 当前任务（放在最前面，模型优先关注）——
+        if task:
+            parts.append("[当前任务]")
+            parts.append(task)
+
+        # —— 预收集的上下文 ——
         if pre_context:
-            parts.append("[预收集的上下文]")
+            if parts:
+                parts.append("")
+            parts.append("---")
+            parts.append("[参考材料 · 预收集的上下文]")
             parts.append(pre_context)
 
         # —— 工具操作记录 ——
         if self._tool_notes:
             if parts:
                 parts.append("")
-            parts.append("[工具操作记录 — Claude Code 已执行的步骤]")
+            if not pre_context:
+                parts.append("---")
+            parts.append("[参考材料 · Claude Code 已执行的步骤]")
             for note in self._tool_notes:
                 parts.append(f"- {note}")
 
@@ -230,8 +240,10 @@ class ConversationHistory:
                     f"\n...[摘要过长已截断，原 {len(self.summary)} 字符]"
                 )
             if parts:
-                parts.append("")  # 与上一段（预收集上下文等）分隔
-            parts.append("[对话摘要]")
+                parts.append("")
+            if not pre_context and not self._tool_notes:
+                parts.append("---")
+            parts.append("[参考材料 · 对话摘要]")
             parts.append(summary_text)
 
         # —— 摘要失败的降级原文 ——
@@ -239,6 +251,8 @@ class ConversationHistory:
         if fallback:
             if parts:
                 parts.append("")
+            if not pre_context and not self._tool_notes and not self.summary:
+                parts.append("---")
             parts.append(fallback)
 
         # —— 最近对话 ——
@@ -255,14 +269,9 @@ class ConversationHistory:
                     recent_lines.append(f"{prefix}{content}")
             if parts:
                 parts.append("")
-            parts.append("[最近对话]")
+            if not pre_context and not self._tool_notes and not self.summary and not fallback:
+                parts.append("---")
+            parts.append("[参考材料 · 最近对话]")
             parts.append("\n".join(recent_lines))
-
-        # —— 当前任务 ——
-        if task:
-            if parts:
-                parts.append("")
-            parts.append("[当前任务]")
-            parts.append(task)
 
         return "\n".join(parts) if parts else ""
