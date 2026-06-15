@@ -83,21 +83,22 @@ def test_get_messages_excludes_internal_fields():
 
 
 def test_get_context_for_strong_with_pre_context():
-    """当前任务应出现在输出最前面，预收集上下文作为参考材料在后。"""
+    """任务指令应出现在输出最前面，参考材料在后。"""
     h = ConversationHistory()
     h.add_user("hello")
     h.add_assistant("hi", source="weak")
 
     result = h.get_context_for_strong(task="current task", pre_context="[文件: foo.py]\nprint('hello')")
 
-    assert "[当前任务]" in result
+    assert "请完成以下任务" in result
+    assert "current task" in result
     assert "[参考材料 · 预收集的上下文]" in result
     assert "[文件: foo.py]" in result
     assert "print('hello')" in result
-    # 当前任务应在参考材料之前
-    task_pos = result.index("[当前任务]")
+    # 指令+任务应在参考材料之前
+    instr_pos = result.index("请完成以下任务")
     ref_pos = result.index("[参考材料 · 预收集的上下文]")
-    assert task_pos < ref_pos
+    assert instr_pos < ref_pos
 
 
 def test_get_context_for_strong_empty_pre_context():
@@ -135,10 +136,10 @@ def test_add_tool_note():
     assert "[参考材料 · Claude Code 已执行的步骤]" in result
     assert "已读取 server.py" in result
     assert "git diff 显示 3 个文件被修改" in result
-    # 当前任务应在工具操作记录之前
-    task_pos = result.index("[当前任务]")
+    # 指令应在工具操作记录之前
+    instr_pos = result.index("请完成以下任务")
     notes_pos = result.index("[参考材料 · Claude Code 已执行的步骤]")
-    assert task_pos < notes_pos
+    assert instr_pos < notes_pos
 
 
 def test_tool_note_does_not_affect_turn_count():
@@ -160,10 +161,10 @@ def test_tool_note_included_in_pre_context_order():
 
     result = h.get_context_for_strong(task="task", pre_context="file content")
 
-    task_pos = result.index("[当前任务]")
+    instr_pos = result.index("请完成以下任务")
     pre_pos = result.index("[参考材料 · 预收集的上下文]")
     notes_pos = result.index("[参考材料 · Claude Code 已执行的步骤]")
-    assert task_pos < pre_pos < notes_pos
+    assert instr_pos < pre_pos < notes_pos
 
 
 def test_tool_note_cleared_with_history():

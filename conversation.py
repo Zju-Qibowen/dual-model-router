@@ -189,17 +189,12 @@ class ConversationHistory:
 
     # ── 强模型上下文入口 ────────────────────────
 
-    def get_context_for_strong(self, task: str | None = None, weak_model=None, pre_context: str = "") -> str:
-        """为强模型调用装配完整上下文。
+    def get_context_for_strong(self, task: str | None = None, weak_model=None,
+                               pre_context: str = "", include_last_turn: bool = False) -> str:
+        """为强模型调用装配完整上下文。任务在前，参考材料在后。
 
-        返回供直接拼入 prompt 的字符串，结构为：
-          [预收集的上下文] → [工具操作记录] → [对话摘要] → [最近对话] → [当前任务]
-
-        弱模型产出的 assistant 消息加 💡 标注。
-        路由标记文本不在此输出中（display-only，在 server 层拼接）。
-
-        pre_context: Claude Code 预收集的文件内容等。放在最前面作为背景知识。
-                     为空时不添加该段落（向后兼容）。
+        include_last_turn: False 时排除 turns 中最新的 user 消息（防止当前任务
+                          在 [最近对话] 中重复出现导致模型误认为对话中断）。
         """
         # 懒触发摘要
         if weak_model and len(self._pending_pairs) >= PENDING_MIN_PAIRS:
@@ -207,9 +202,10 @@ class ConversationHistory:
 
         parts = []
 
-        # —— 当前任务（放在最前面，模型优先关注）——
+        # —— 当前任务（放在最前面，加明确的行为指令）——
         if task:
-            parts.append("[当前任务]")
+            parts.append("请完成以下任务。如有参考材料，请结合材料作答。")
+            parts.append("")
             parts.append(task)
 
         # —— 预收集的上下文 ——
@@ -256,9 +252,13 @@ class ConversationHistory:
             parts.append(fallback)
 
         # —— 最近对话 ——
-        if self.turns:
+        # 默认排除最新的 user 消息（它已经作为 task 出现在前面，不应重复）
+        turns_to_show = list(self.turns)
+        if not include_last_turn and turns_to_show and turns_to_show[-1]["role"] == "user":
+            turns_to_show.pop()
+        if turns_to_show:
             recent_lines = []
-            for t in self.turns:
+            for t in turns_to_show:
                 role = t["role"]
                 content = t["content"]
                 if role == "user":
