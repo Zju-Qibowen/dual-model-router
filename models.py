@@ -176,16 +176,20 @@ class AnthropicModel:
 
     # ── 公开方法 ────────────────────────────────
 
-    def call(self, prompt: str, context: Optional[str] = None, history: Optional[list[dict]] = None) -> str:
-        """纯文本调用。"""
+    def call(self, prompt: str, context: Optional[str] = None,
+             history: Optional[list[dict]] = None, system: Optional[str] = None) -> str:
+        """纯文本调用。
+
+        history: 对话历史 [{"role": "user"/"assistant", "content": "..."}]。
+                 通过原生 messages 数组传递，非文本拼接。
+        """
         content = f"{context}\n\n{prompt}" if context else prompt
         messages = list(history) if history else []
         messages.append({"role": "user", "content": content})
-        response = self.client.messages.create(
-            model=self.model,
-            max_tokens=self.max_tokens,
-            messages=messages,
-        )
+        kwargs = dict(model=self.model, max_tokens=self.max_tokens, messages=messages)
+        if system:
+            kwargs["system"] = system
+        response = self.client.messages.create(**kwargs)
         text = self._extract_text(response)
         return self._post_process(text, response)
 

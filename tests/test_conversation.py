@@ -102,7 +102,7 @@ def test_get_context_for_strong_with_pre_context():
 
 
 def test_get_context_for_strong_empty_pre_context():
-    """pre_context 为空时不应添加参考材料段落。"""
+    """pre_context 为空时不应添加参考材料段落。对话历史现在由 API 原生传递。"""
     h = ConversationHistory()
     h.add_user("hello")
     h.add_assistant("hi")
@@ -110,7 +110,7 @@ def test_get_context_for_strong_empty_pre_context():
     result = h.get_context_for_strong(task="current", pre_context="")
 
     assert "[参考材料 · 预收集的上下文]" not in result
-    assert "[参考材料 · 最近对话]" in result
+    assert "[参考材料 · 最近对话]" not in result  # 不再嵌入文本，通过 API history 参数传递
 
 
 def test_get_context_for_strong_pre_context_only():

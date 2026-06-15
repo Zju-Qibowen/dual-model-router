@@ -245,24 +245,7 @@ class ConversationHistory:
             parts.append(fallback)
 
         # —— 最近对话 ——
-        # 默认排除最新的 user 消息（它已经作为 task 出现在前面，不应重复）
-        turns_to_show = list(self.turns)
-        if not include_last_turn and turns_to_show and turns_to_show[-1]["role"] == "user":
-            turns_to_show.pop()
-        if turns_to_show:
-            recent_lines = []
-            for t in turns_to_show:
-                role = t["role"]
-                content = t["content"]
-                if role == "user":
-                    recent_lines.append(f"用户: {content}")
-                else:
-                    src = t.get("source", "")
-                    prefix = "💡 弱模型: " if src == "weak" else "助手: "
-                    recent_lines.append(f"{prefix}{content}")
-            if parts:
-                parts.append("")
-            parts.append("[参考材料 · 最近对话]")
-            parts.append("\n".join(recent_lines))
+        # 不再嵌入文本：由调用方通过 Anthropic API 原生的 messages history 传递。
+        # 文本拼接的 用户:/助手: 格式会导致模型将任务指令误解为对话转录的旁白。
 
         return "\n".join(parts) if parts else ""

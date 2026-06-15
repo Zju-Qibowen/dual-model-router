@@ -516,7 +516,7 @@ def handle_task(
     if decision == "strong":
         try:
             prompt = strong_context if strong_context else weak_execution_task
-            answer = strong.call(prompt)
+            answer = strong.call(prompt, history=history)
         except Exception as e:
             return {"_error": True, "step": "强模型直接执行", "model": strong.model, "model_type": "strong", "error": e}
         return {"routed_to": "strong", "final_answer": answer, "reviewed": False, "weak_result": None, "token_count": None}
@@ -550,7 +550,7 @@ def handle_task(
         review_prompt = f"[预收集的上下文]\n{pre_context}\n\n{review_prompt}"
 
     try:
-        reviewed_raw = strong.call(review_prompt)
+        reviewed_raw = strong.call(review_prompt, history=history)
         verdict, reviewed = _parse_verdict(reviewed_raw)
     except Exception as e:
         return {"_error": True, "step": "强模型审核", "model": strong.model, "model_type": "strong", "error": e, "weak_result": weak_result, "token_count": token_count}
@@ -866,7 +866,7 @@ def ask_strong(prompt: str, weak_response: str = "", images_json: str = "", cont
         if all_images and strong.supports_vision:
             result = strong.call_with_images(full_prompt, all_images)
         else:
-            result = strong.call(full_prompt)
+            result = strong.call(full_prompt, history=_history.get_messages()[:-1])
 
         _history.add_assistant(result, source="strong")
         return f"{header}\n{result}"
@@ -910,7 +910,7 @@ def review(content: str, context: str = "") -> str:
     if strong_context:
         base = f"{strong_context}\n\n{base}"
     try:
-        result = strong.call(base)
+        result = strong.call(base, history=_history.get_messages())
         return f"📡 {strong.model} · 🔍 审核\n{result}"
     except Exception as e:
         return _format_error("审核", strong.model, e, "strong")
