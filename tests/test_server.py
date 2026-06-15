@@ -37,18 +37,30 @@ def test_handle_task_passes_history_to_execution():
     assert exec_call.kwargs.get("history") == history
 
 
-def test_handle_task_strong_path_passes_history():
+def test_handle_task_strong_path_uses_strong_context():
     from server import handle_task
     weak = MagicMock()
     strong = MagicMock()
     weak.call.return_value = "strong"
     strong.call.return_value = "complex answer"
-    history = [{"role": "user", "content": "prev"}]
 
-    handle_task("complex task", weak, strong, history=history)
+    handle_task("complex task", weak, strong, strong_context="summary + history + task")
 
     strong.call.assert_called_once()
-    assert strong.call.call_args.kwargs.get("history") == history
+    assert strong.call.call_args.args[0] == "summary + history + task"
+
+
+def test_handle_task_strong_path_falls_back_to_task_without_context():
+    from server import handle_task
+    weak = MagicMock()
+    strong = MagicMock()
+    weak.call.return_value = "strong"
+    strong.call.return_value = "complex answer"
+
+    handle_task("complex task", weak, strong)
+
+    strong.call.assert_called_once()
+    assert strong.call.call_args.args[0] == "complex task"
 
 
 def test_handle_task_routes_medium_with_review():
@@ -145,3 +157,111 @@ def test_get_context_status_shows_info():
 
     assert "1/" in result
     assert "轮数" in result
+
+
+# ── pre_context 测试 ──────────────────────────────
+
+
+def test_handle_task_weak_with_pre_context():
+    """weak 路径下 weak.call 应收到含 pre_context 的 prompt。"""
+    from server import handle_task
+    weak, strong = make_mocks(weak_response="weak", weak_result="simple answer")
+
+    result = handle_task("simple task", weak, strong, pre_context="[文件: foo.py]\ncode")
+
+    assert result["routed_to"] == "weak"
+    # weak.call 被调用两次：第一次路由判断，第二次执行
+    exec_call = weak.call.call_args_list[1]
+    prompt_text = exec_call.args[0]
+    assert "[预收集的上下文]" in prompt_text
+    assert "[文件: foo.py]" in prompt_text
+    assert "simple task" in prompt_text
+
+
+def test_handle_task_strong_with_pre_context():
+    """strong 路径且无 strong_context 时，fallback 应含 pre_context。"""
+    from server import handle_task
+    weak = MagicMock()
+    strong = MagicMock()
+    weak.call.return_value = "strong"
+    strong.call.return_value = "complex answer"
+
+    result = handle_task("complex task", weak, strong, pre_context="[文件: bar.py]\ncode")
+
+    assert result["routed_to"] == "strong"
+    strong.call.assert_called_once()
+    prompt = strong.call.call_args.args[0]
+    assert "[预收集的上下文]" in prompt
+    assert "[文件: bar.py]" in prompt
+
+
+def test_handle_task_medium_with_pre_context():
+    """medium 路径下 weak 执行和 strong 审核都应含 pre_context。"""
+    from server import handle_task
+    weak, strong = make_mocks(weak_response="medium", weak_result="summary")
+    strong.call.return_value = "[VERDICT: pass] reviewed"
+
+    result = handle_task("analyze this", weak, strong, pre_context="[文件: baz.py]\ncode")
+
+    assert result["routed_to"] == "medium"
+    # weak 执行调用（第 2 次 call）
+    weak_exec = weak.call.call_args_list[1]
+    weak_prompt = weak_exec.args[0]
+    assert "[预收集的上下文]" in weak_prompt
+    assert "[文件: baz.py]" in weak_prompt
+
+    # strong 审核调用（fallback 路径：strong_context 未传，由 elif 注入）
+    strong_prompt = strong.call.call_args.args[0]
+    assert "[预收集的上下文]" in strong_prompt
+
+
+def test_handle_task_weak_without_pre_context():
+    """pre_context 为空时不应添加 [预收集的上下文]。"""
+    from server import handle_task
+    weak, strong = make_mocks(weak_response="weak", weak_result="simple answer")
+
+    result = handle_task("simple task", weak, strong)  # no pre_context
+
+    assert result["routed_to"] == "weak"
+    exec_call = weak.call.call_args_list[1]
+    prompt_text = exec_call.args[0]
+    assert "[预收集的上下文]" not in prompt_text
+
+
+def test_handle_task_medium_no_duplicate_pre_context():
+    """strong_context 已含 pre_context 时，review_prompt 不应重复注入。"""
+    from server import handle_task
+    weak, strong = make_mocks(weak_response="medium", weak_result="summary")
+    strong.call.return_value = "[VERDICT: pass] reviewed"
+
+    # strong_context 已内含一次 [预收集的上下文]（模拟 get_context_for_strong 输出）
+    strong_ctx = (
+        "[预收集的上下文]\n[文件: baz.py]\ncode\n\n"
+        "[当前任务]\nanalyze this"
+    )
+
+    result = handle_task(
+        "analyze this", weak, strong,
+        strong_context=strong_ctx,
+        pre_context="[文件: baz.py]\ncode",
+    )
+    assert result["routed_to"] == "medium"
+
+    strong_prompt = strong.call.call_args.args[0]
+    # 核心断言：只出现一次，不应重复
+    assert strong_prompt.count("[预收集的上下文]") == 1
+
+
+def test_handle_task_strong_without_pre_context():
+    """strong 路径无 pre_context 时不应添加该段落。"""
+    from server import handle_task
+    weak = MagicMock()
+    strong = MagicMock()
+    weak.call.return_value = "strong"
+    strong.call.return_value = "complex answer"
+
+    result = handle_task("complex task", weak, strong)
+
+    assert result["routed_to"] == "strong"
+    prompt = strong.call.call_args.args[0]
+    assert "[预收集的上下文]" not in prompt

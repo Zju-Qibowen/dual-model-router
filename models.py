@@ -39,6 +39,22 @@ class DeepSeekModel:
         )
         return response.choices[0].message.content
 
+    def summarize_conversation(self, pending_text: str, existing_summary: str = "") -> str:
+        """将新对话片段的关键信息合并到已有摘要中。
+
+        用于渐进式摘要：旧对话被裁剪时，不丢弃而是压缩为摘要。
+        只保留对后续对话有参考价值的信息：决策、约束、关键结论、未解决的问题。
+        """
+        prompt_parts = [
+            "将以下新对话片段的关键信息合并到已有摘要中。",
+            "只保留对后续对话有参考价值的信息：决策、约束、关键结论、未解决的问题。",
+            "忽略寒暄和重复内容。用中文简要列出，每条一行。",
+        ]
+        if existing_summary:
+            prompt_parts.append(f"\n[已有摘要]\n{existing_summary}")
+        prompt_parts.append(f"\n[新对话]\n{pending_text}")
+        return self.call("\n".join(prompt_parts))
+
 
 class AnthropicModel:
     def __init__(
