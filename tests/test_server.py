@@ -265,3 +265,75 @@ def test_handle_task_strong_without_pre_context():
     assert result["routed_to"] == "strong"
     prompt = strong.call.call_args.args[0]
     assert "[预收集的上下文]" not in prompt
+
+
+# ── system prompt & self-intro 检测 ──────────────────
+
+
+def test_check_self_intro_detects_claude_intro():
+    """检测经典的 Claude 自我介绍。"""
+    from server import _check_self_intro
+    result = _check_self_intro("我是 Claude，由 Anthropic 开发的 AI 助手。")
+    assert result is not None
+    assert "⚠️" in result
+
+
+def test_check_self_intro_detects_model_id_intro():
+    """检测带模型名的元信息式介绍（中转站常见模式）。"""
+    from server import _check_self_intro
+    result = _check_self_intro("我是 Claude，由 Anthropic 开发的 AI 助手，当前请求的模型是 claude-opus-4-8。")
+    assert result is not None
+
+
+def test_check_self_intro_passes_normal_response():
+    """正常任务执行结果不应触发检测。"""
+    from server import _check_self_intro
+    result = _check_self_intro("根据分析，NPC 系统方案存在以下问题：1. ...")
+    assert result is None
+
+
+def test_check_self_intro_ignores_long_response():
+    """长度超过 300 字符的响应即使含'我是'也不触发（可能是任务内容）。"""
+    from server import _check_self_intro
+    long_text = "我是谁？这是一个哲学问题。" + "x" * 300
+    assert _check_self_intro(long_text) is None
+
+
+def test_handle_task_strong_passes_system_prompt():
+    """strong 路径应将 DEFAULT_SYSTEM_PROMPT 作为 system 参数传入。"""
+    from server import handle_task, DEFAULT_SYSTEM_PROMPT
+    weak = MagicMock()
+    strong = MagicMock()
+    weak.call.return_value = "strong"
+    strong.call.return_value = "complex answer"
+
+    handle_task("complex task", weak, strong)
+
+    strong.call.assert_called_once()
+    assert strong.call.call_args.kwargs.get("system") == DEFAULT_SYSTEM_PROMPT
+
+
+def test_handle_task_strong_adds_self_intro_warning():
+    """当 strong 模型返回自我介绍时，应在结果前追加警告。"""
+    from server import handle_task
+    weak = MagicMock()
+    strong = MagicMock()
+    weak.call.return_value = "strong"
+    strong.call.return_value = "我是 Claude，由 Anthropic 开发的 AI 助手。"
+
+    result = handle_task("complex task", weak, strong)
+
+    assert result["routed_to"] == "strong"
+    assert "⚠️" in result["final_answer"]
+    assert "自我介绍" in result["final_answer"]
+
+
+def test_handle_task_medium_review_passes_system_prompt():
+    """medium 审核路径也应传入 system prompt。"""
+    from server import handle_task, DEFAULT_SYSTEM_PROMPT
+    weak, strong = make_mocks(weak_response="medium", weak_result="summary")
+    strong.call.return_value = "[VERDICT: pass] reviewed"
+
+    handle_task("analyze this", weak, strong)
+
+    assert strong.call.call_args.kwargs.get("system") == DEFAULT_SYSTEM_PROMPT

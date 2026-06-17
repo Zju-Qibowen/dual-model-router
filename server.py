@@ -37,6 +37,35 @@ IMAGE_CACHE_MAX_FILES = 100
 IMAGE_CACHE_TTL_HOURS = int(os.environ.get("IMAGE_CACHE_TTL_HOURS", "168"))  # 默认 7 天
 
 
+# ── 系统提示词 ──────────────────────────────────
+# 通过 Anthropic API system 参数注入，防止模型在复杂上下文中返回自我介绍
+DEFAULT_SYSTEM_PROMPT = (
+    "你是一个直接执行用户任务的 AI 助手。重要规则："
+    "直接开始执行任务，不要自我介绍；"
+    "不要提及你的模型名称或开发者（用户已知）；"
+    "不要说你是什么模型。"
+)
+
+# ── 自我介绍检测 ──────────────────────────────
+# 匹配常见自我介绍模式，用于检测模型是否正确执行任务
+SELF_INTRO_RE = re.compile(
+    r'(?:^|\n)\s*(?:我是|我叫|I am|I\'m)\s*(?:Claude|AI|人工智能|Anthropic|由\s*Anthropic|当前请求的模型)',
+    re.IGNORECASE,
+)
+
+def _check_self_intro(text: str) -> str | None:
+    """检测强模型响应是否为自我介绍而非任务执行。
+
+    返回警告消息字符串，正常响应返回 None。
+    仅对异常短的响应做检测（正常任务结果通常远超 300 字符）。
+    """
+    if len(text) < 300 and SELF_INTRO_RE.search(text):
+        return (
+            "⚠️ 模型可能未正确执行任务（疑似返回自我介绍而非结果）。"
+            "建议: (1) 重试相同请求 (2) 用 set_strong_model 切换模型 (3) 检查 API 中转配置"
+        )
+    return None
+
 # ── 审核增强：VERDICT 正则 ──────────────────────
 VERDICT_RE = re.compile(r'\[VERDICT:\s*(pass|revise|overturn)\]', re.IGNORECASE)
 
@@ -516,7 +545,10 @@ def handle_task(
     if decision == "strong":
         try:
             prompt = strong_context if strong_context else weak_execution_task
-            answer = strong.call(prompt, history=history)
+            answer = strong.call(prompt, history=history, system=DEFAULT_SYSTEM_PROMPT)
+            intro_warn = _check_self_intro(answer)
+            if intro_warn:
+                answer = f"{intro_warn}\n\n{answer}"
         except Exception as e:
             return {"_error": True, "step": "强模型直接执行", "model": strong.model, "model_type": "strong", "error": e}
         return {"routed_to": "strong", "final_answer": answer, "reviewed": False, "weak_result": None, "token_count": None}
@@ -550,7 +582,7 @@ def handle_task(
         review_prompt = f"[预收集的上下文]\n{pre_context}\n\n{review_prompt}"
 
     try:
-        reviewed_raw = strong.call(review_prompt, history=history)
+        reviewed_raw = strong.call(review_prompt, history=history, system=DEFAULT_SYSTEM_PROMPT)
         verdict, reviewed = _parse_verdict(reviewed_raw)
     except Exception as e:
         return {"_error": True, "step": "强模型审核", "model": strong.model, "model_type": "strong", "error": e, "weak_result": weak_result, "token_count": token_count}
@@ -864,9 +896,15 @@ def ask_strong(prompt: str, weak_response: str = "", images_json: str = "", cont
             header = f"📡 {strong.model}"
 
         if all_images and strong.supports_vision:
-            result = strong.call_with_images(full_prompt, all_images)
+            result = strong.call_with_images(full_prompt, all_images, system=DEFAULT_SYSTEM_PROMPT)
+            intro_warn = _check_self_intro(result)
+            if intro_warn:
+                result = f"{intro_warn}\n\n{result}"
         else:
-            result = strong.call(full_prompt, history=_history.get_messages()[:-1])
+            result = strong.call(full_prompt, history=_history.get_messages()[:-1], system=DEFAULT_SYSTEM_PROMPT)
+            intro_warn = _check_self_intro(result)
+            if intro_warn:
+                result = f"{intro_warn}\n\n{result}"
 
         _history.add_assistant(result, source="strong")
         return f"{header}\n{result}"
@@ -910,7 +948,7 @@ def review(content: str, context: str = "") -> str:
     if strong_context:
         base = f"{strong_context}\n\n{base}"
     try:
-        result = strong.call(base, history=_history.get_messages())
+        result = strong.call(base, history=_history.get_messages(), system=DEFAULT_SYSTEM_PROMPT)
         return f"📡 {strong.model} · 🔍 审核\n{result}"
     except Exception as e:
         return _format_error("审核", strong.model, e, "strong")

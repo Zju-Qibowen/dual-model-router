@@ -240,7 +240,8 @@ class AnthropicModel:
 
         return text
 
-    def call_with_images(self, prompt: str, images: list[dict], history: Optional[list[dict]] = None) -> str:
+    def call_with_images(self, prompt: str, images: list[dict], history: Optional[list[dict]] = None,
+                         system: Optional[str] = None) -> str:
         """原生多模态调用 —— prompt + 图片直接发给强模型。
 
         describe_images 截断时抛异常（中间产物，下游不知情），
@@ -274,6 +275,7 @@ class AnthropicModel:
             model=self.model,
             max_tokens=self.max_tokens,
             messages=messages,
+            **({"system": system} if system else {}),
         )
         text = self._extract_text(response)
         return self._post_process(text, response)
